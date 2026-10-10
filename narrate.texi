@@ -1,0 +1,482 @@
+\input texinfo    @c -*- texinfo -*-
+@c %**start of header
+@setfilename narrate.info
+@settitle narrate
+@documentencoding UTF-8
+@documentlanguage en
+@c %**end of header
+
+@dircategory Emacs
+@direntry
+* Narrate: (narrate).   Turn books and documents into chaptered audiobooks.
+@end direntry
+
+@finalout
+@titlepage
+@title narrate
+@subtitle Turn books and documents into chaptered audiobooks from Emacs
+@author Stephen Webber
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top narrate
+
+narrate reads EPUB, PDF, DOCX, Org, Markdown, and plain text, finds the chapters, voices the text with the speech engines you choose, and writes an M4B or MP3 with chapter marks. It runs from Emacs, with a chapter outline, auditions, voice tryouts, and background renders, and its backend also works from a shell.
+
+It has no favorite engine. Profiles in a small TOML file name an engine, a voice, a delivery style, and an audio filter; a profile can fall back to others when it can't run, and new engines and input formats plug in without changing narrate itself.
+@end ifnottex
+
+@menu
+* What it does::
+* Requirements::
+* Install::
+* Engines::
+* Use::
+* Configuration::
+* Extending::
+* Privacy::
+* Troubleshooting::
+* License::
+
+@detailmenu
+--- The Detailed Node Listing ---
+
+Install
+
+* The package::
+* Profiles::
+* API keys::
+
+Engines
+
+* tone::
+* gemini::
+* breeze::
+* kokoro::
+* speechify::
+* Your own::
+
+Use
+
+* Commands::
+* The chapter outline::
+* Stopping and resuming::
+* Finding a voice::
+* GPU load::
+* From a shell::
+
+Configuration
+
+* Files and folders::
+
+@end detailmenu
+@end menu
+
+@node What it does
+@chapter What it does
+
+@itemize
+@item
+Reads EPUB (table of contents), PDF (bookmarks or type size, with running headers, page numbers, and footnotes dropped), DOCX (heading styles), Org (headlines), Markdown (@samp{#} headings), and plain text ("Chapter 3", "Part Two", "IV")
+@item
+Treats lines like @samp{* * *} or @samp{⁂} as scene breaks and pauses longer there
+@item
+Gives each chapter inside a part its own chapter mark, titled with its part ("Part One — The Crossing"), so a listening app can skip by chapter instead of scrubbing through a part hours long; @samp{S} in the outline, or @samp{split = "top"}, keeps one mark per part instead
+@item
+Voices chunks through an engine, caching each one by its text and voice, so a stopped or crashed render picks up where it left off, and changing only tempo or filter re-encodes without voicing anything again
+@item
+Waits out rate limits and daily quotas instead of failing, and never switches voices partway through a book
+@item
+Splits a passage an engine refuses down to the refused sentence and has another profile read just that sentence, logging each case
+@item
+Designs voices from a written description (on engines that support it), tries several descriptions and takes side by side, and saves the one you pick as a profile
+@item
+Lets engines on your GPU rest between chunks, so a long book can run cool and quiet
+@item
+Asks before sending a manuscript to an engine that runs off your machine
+@end itemize
+
+@node Requirements
+@chapter Requirements
+
+@itemize
+@item
+Emacs 29.1 or newer
+@item
+Python 3.11 or newer
+@item
+ffmpeg, which joins the chunks, applies filters, and writes the M4B or MP3 with chapter marks
+@item
+PyMuPDF (@samp{pip install pymupdf}), for PDFs only: it supplies text with positions, which is what lets narrate drop headers, page numbers, and footnotes
+@item
+At least one speech engine (see @ref{Engines}); the built-in @samp{tone} engine needs nothing and is enough to try everything but the voices
+@end itemize
+
+@node Install
+@chapter Install
+
+@menu
+* The package::
+* Profiles::
+* API keys::
+@end menu
+
+@node The package
+@section The package
+
+Clone the repository anywhere and put it on Emacs's load path:
+
+@lisp
+(add-to-list 'load-path "~/path/to/narrate")
+(require 'narrate)
+(keymap-global-set "C-c n" 'narrate-command-map)   ; any free prefix
+(with-eval-after-load 'dired
+  (keymap-set dired-mode-map "C-c N" #'narrate-dired))
+@end lisp
+
+Or with @samp{use-package} and @samp{:vc} (Emacs 30):
+
+@lisp
+(use-package narrate
+  :vc (:url "https://github.com/offgridauthor/narrate")
+  :bind-keymap ("C-c n" . narrate-command-map))
+@end lisp
+
+@samp{make info} builds the Info manual from this file; with the repository on @samp{Info-additional-directory-list}, @samp{C-h i} lists narrate like any other package (package managers that install from the repository do this on their own).
+
+The Emacs side runs the backend with @samp{narrate-python}, which defaults to a venv at @samp{~/.local/share/narrate/venv} when there is one and @samp{python3} otherwise. A venv keeps engine packages (and their large dependencies) out of the system Python:
+
+@example
+python3 -m venv ~/.local/share/narrate/venv
+~/.local/share/narrate/venv/bin/pip install pymupdf
+@end example
+
+From a shell, @samp{narrate-cli} in the repository runs the backend without installing anything, and @samp{pip install .} (or @samp{pip install -e .}) installs it as a @samp{narrate} command.
+
+@node Profiles
+@section Profiles
+
+Copy @samp{profiles.example.toml} to @samp{~/.config/narrate/profiles.toml} and edit it. It starts on the @samp{dry-run} profile, which ticks instead of speaking, so the whole path from book to M4B can be checked before any engine is installed. @samp{NARRATE_CONFIG}, or @samp{narrate-profiles-file} in Emacs, points at a profiles file somewhere else; the folder it sits in is narrate's config folder.
+
+@node API keys
+@section API keys
+
+Cloud engines read their keys from the environment. In Emacs, @samp{narrate-auth-hosts} also fills them from auth-source, e.g. in @samp{~/.authinfo.gpg}:
+
+@example
+machine generativelanguage.googleapis.com login apikey password YOUR-GEMINI-KEY
+machine api.speechify.ai login apikey password YOUR-SPEECHIFY-KEY
+@end example
+
+A variable already set in the environment wins.
+
+@node Engines
+@chapter Engines
+
+Each engine is optional; profiles whose engine can't run report themselves unavailable, and their fallbacks take over.
+
+@menu
+* tone::
+* gemini::
+* breeze::
+* kokoro::
+* speechify::
+* Your own::
+@end menu
+
+@node tone
+@section tone
+
+Built in. A soft tick per sentence at ten times the speed of speech, for checking extraction, chapters, and assembly.
+
+@node gemini
+@section gemini
+
+Gemini TTS through the Gemini API@. Get a key from Google AI Studio and set @samp{GEMINI_API_KEY}. Voices are Google's prebuilt ones (@samp{voice}), or designed from a description (@samp{design}), which narrate does once and caches in @samp{voices.json}.
+
+Text sent to the Gemini API leaves your machine. On Google's free tier, Google may review it and use it to improve its products, and Google asks people not to send sensitive or personal information to its unpaid services. narrate asks before a Gemini profile renders a book or auditions text you selected.
+
+@node breeze
+@section breeze
+
+Breeze TTS 2 through @uref{https://github.com/HoppouAI/Breeze-TTS-2.cpp, Breeze-TTS-2.cpp}, a local server that runs on a GPU through Vulkan (or on the CPU). Text stays on your machine. Build it into narrate's data folder:
+
+@example
+# Debian or Ubuntu
+sudo apt install cmake ninja-build g++ libvulkan-dev glslc spirv-headers
+cd ~/.local/share/narrate
+git clone --recursive https://github.com/HoppouAI/Breeze-TTS-2.cpp
+cd Breeze-TTS-2.cpp
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+mkdir -p ~/.local/share/narrate/models
+# then download one .gguf model from the project's Hugging Face page into models/
+@end example
+
+@itemize
+@item
+The apt packages are a compiler, CMake, and the Vulkan headers and shader compiler the GPU backend needs. A working GPU driver already supplies Vulkan itself.
+@item
+@samp{spirv-headers} is required by ggml's Vulkan backend; without it CMake stops partway through configuring, and the build step finds nothing to compile.
+@item
+narrate looks for @samp{build/breeze-server} and the only @samp{.gguf} in @samp{models/}; @samp{server} and @samp{model} in a profile point elsewhere.
+@item
+narrate starts the server on port 8137 when a render needs it and stops it afterwards. If a crash leaves one running, @samp{pkill breeze-server} clears it.
+@end itemize
+
+Breeze's weights are licensed for research and non-commercial use, which covers listening yourself but not selling the audio. It reads English and Chinese.
+
+Breeze designs a new voice on every call, so a book voiced straight from a description would wander. narrate designs the voice once, on a fixed reference line (@samp{ref_line}), saves it as a cloned voice in @samp{breeze-voices/} beside the profiles file, and reads every chunk in that voice. A different @samp{seed} gives a different take on the same description.
+
+@node kokoro
+@section kokoro
+
+Kokoro-82M through its Python package, on your GPU if PyTorch sees one, otherwise the CPU@. Text stays on your machine.
+
+@example
+sudo apt install espeak-ng     # Kokoro's fallback for words outside its dictionary
+~/.local/share/narrate/venv/bin/pip install torch    # the build that matches your GPU
+~/.local/share/narrate/venv/bin/pip install kokoro soundfile
+@end example
+
+Kokoro and its dependencies may lag behind the newest Python; a venv made with an older Python (uv can fetch one: @samp{uv venv --seed --python 3.12 ~/.local/share/narrate/venv}) avoids that. Voice files download from Hugging Face on first use. A profile's @samp{voice} can be one voice or a weighted blend of several.
+
+@node speechify
+@section speechify
+
+Speechify's paid API@. Set @samp{SPEECHIFY_API_KEY} and give the profile a @samp{voice} id from Speechify's catalog. Text leaves your machine.
+
+@node Your own
+@section Your own
+
+See @ref{Extending}.
+
+@node Use
+@chapter Use
+
+@menu
+* Commands::
+* The chapter outline::
+* Stopping and resuming::
+* Finding a voice::
+* GPU load::
+* From a shell::
+@end menu
+
+@node Commands
+@section Commands
+
+@multitable {aaaaaaaaaaaaaaaaaaaaaaa} {aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+@headitem command
+@tab does
+@item @samp{narrate-file}
+@tab open a book's chapter outline
+@item @samp{narrate-dired}
+@tab the same, for the file at point in Dired
+@item @samp{narrate-buffer}
+@tab an outline of the current buffer, saved or not
+@item @samp{narrate-region}
+@tab an outline of the selected text
+@item @samp{narrate-audition}
+@tab hear a profile read a stock passage, or the selected text
+@item @samp{narrate-design-voice}
+@tab create a profile's designed voice and play its preview
+@item @samp{narrate-tryout}
+@tab several descriptions, several takes each, side by side
+@item @samp{narrate-keep}
+@tab save one tryout take as a profile of its own
+@item @samp{narrate-gpu-share}
+@tab how much of the time local engines keep the GPU busy
+@item @samp{narrate-edit-profiles}
+@tab visit the profiles file
+@item @samp{narrate-open-output}
+@tab open the output folder
+@item @samp{narrate-show-log}
+@tab show a render's log
+@item @samp{narrate-cancel}
+@tab stop a render (finished chunks stay cached)
+@item @samp{narrate-resume}
+@tab pick up an unfinished render where it left off
+@item @samp{narrate-stop-playback}
+@tab stop an audition or preview
+@end multitable
+
+@samp{narrate-command-map} holds them all: @samp{f} file, @samp{b} buffer, @samp{r} region, @samp{a} audition, @samp{d} design a voice, @samp{t} try out voices, @samp{K} keep a take, @samp{g} GPU share, @samp{p} edit profiles, @samp{o} output folder, @samp{l} logs, @samp{k} stop a render, @samp{R} resume one, @samp{s} stop playback.
+
+@node The chapter outline
+@section The chapter outline
+
+Every chapter starts marked. With a prefix argument, @samp{narrate-file} asks for the profile first.
+
+@multitable {aaaaa} {aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+@headitem key
+@tab does
+@item m u t
+@tab mark, unmark, toggle all (unmark copyright pages and indexes)
+@item RET
+@tab read the text narrate extracted for that chapter
+@item a
+@tab hear the current profile read the chapter's opening
+@item p
+@tab switch profile
+@item r
+@tab render the marked chapters in the background
+@item S
+@tab switch between a mark per chapter inside parts and one per part
+@item E
+@tab export the extracted text to Org for hand cleanup
+@item g
+@tab re-read the source after you edit it
+@item o
+@tab open the output folder
+@end multitable
+
+The header line shows the book, the profile and whether it stays on this machine (@samp{local}) or sends text off it (@samp{cloud}), the marked length, and the keys. Renders show progress in the mode line, like @samp{[narrate 12% · 168/1400 chunks · 2h 10m left]}, and log to @samp{*narrate log: TITLE*}. Finished books go to @samp{output_dir} (@samp{~/Audiobooks} by default), named after the book and profile, and @samp{narrate-finished-hook} receives the path.
+
+For PDFs, @samp{RET} on a chapter shows what will be read. If headers, footnotes, or broken columns slipped through, @samp{E} writes the text to an Org file; fix it there, and @samp{narrate-buffer} in that file reads your corrections.
+
+@node Stopping and resuming
+@section Stopping and resuming
+
+Every chunk is saved as soon as it's voiced, so a render can stop at any point without losing work. narrate remembers each render from the moment it starts until its book is written, so one stopped with @samp{narrate-cancel}, paused at a daily quota, cut off by a crash, or left behind when Emacs closed can be picked up with @samp{narrate-resume}: it starts the same render again, with the same book, profile, chapters, format, and output folder, and the chunks already voiced come straight from the cache. After startup, narrate mentions any unfinished renders (@samp{narrate-mention-unfinished}), and @samp{C-u M-x narrate-resume} forgets one instead.
+
+Renders run as Emacs subprocesses, so closing Emacs stops them; Emacs asks first when one is running. Books are written under a temporary name and renamed when complete, so an interrupted render never leaves a half-written file that looks finished.
+
+@node Finding a voice
+@section Finding a voice
+
+@enumerate
+@item
+@strong{Try.} @samp{narrate-tryout} asks for a profile, where the descriptions come from (@samp{tryout-designs.txt} beside the profiles file, or the profile's own @samp{design}), and how many takes of each. The profile supplies the engine, filter, tempo, and fallbacks; the descriptions supply who's speaking. Every take reads the same passage (@samp{tryout_text}), so takes compare the way they'd sound in a book. A line in the descriptions file can end with @samp{| style} to try a delivery note with it.
+@item
+@strong{Listen.} The batch's @samp{index.org} opens, listing the descriptions and the takes with their start times in @samp{all.wav}, which plays every take in order. Batches stay in folders under @samp{~/.cache/narrate/}, named by date and time.
+@item
+@strong{Keep.} With the cursor on a take's row in @samp{index.org} (or its file in Dired), @samp{narrate-keep} asks for a name and adds a profile by that name to the end of the profiles file. For Breeze it copies the take's reference clip into @samp{breeze-voices/}, so the kept voice is the one you heard; for Gemini it records the designed voice's @samp{voice_id}.
+@end enumerate
+
+Gemini takes each use one of the stored voices Google allows a project (200 at the time of writing); unused ones expire.
+
+@node GPU load
+@section GPU load
+
+Engines on the GPU (@samp{breeze}, @samp{kokoro}) can rest between chunks. @samp{gpu_share} is the fraction of the time the GPU works: at 0.3, every 3 seconds of work is followed by 7 seconds of rest. @samp{narrate-gpu-share} changes it while a render runs, and @samp{C-u M-x narrate-gpu-share} goes back to the profiles file's setting. Resting lowers heat, fan noise, and average draw; the energy per book stays about the same. A power cap on the GPU itself (for NVIDIA, @samp{sudo nvidia-smi -pl WATTS}) is another knob, and the two combine.
+
+@node From a shell
+@section From a shell
+
+@example
+narrate-cli profiles [--json]
+narrate-cli outline FILE [--json] [--text] [--split parts|top]
+narrate-cli extract FILE OUT.org [--split parts|top]
+narrate-cli audition --profile NAME [--text-file F] --out OUT.wav
+narrate-cli design --profile NAME --out PREVIEW.wav [--refresh]
+narrate-cli tryout --profile NAME --out DIR [--designs FILE] [--takes N] [--text-file F] [--tempo T]
+narrate-cli keep TRYOUT_DIR --take 01-3 --as NAME
+narrate-cli render FILE --profile NAME [--chapters 1,3-5] [--out DIR] [--format m4b|mp3|mp3-split] [--split parts|top] [--no-wait]
+@end example
+
+@samp{--config PROFILES.toml} goes before the command. Machine-readable events go to stdout as JSON lines, and the log goes to stderr. @samp{--no-wait} exits with code 75 at a daily quota instead of waiting for it to reset.
+
+@node Configuration
+@chapter Configuration
+
+@samp{profiles.example.toml} documents every key. In short:
+
+@itemize
+@item
+@samp{[defaults]} holds settings every profile inherits: the profile outlines open on, the output folder and format, tempo, gaps, loudness, @samp{gpu_share}, and the stock passages
+@item
+each @samp{[profiles.NAME]} table names an @samp{engine} and whatever that engine takes, plus any of the shared keys
+@item
+@samp{fallback} lists profiles to try when this one can't run here
+@item
+@samp{split} in @samp{[defaults]} decides how parts divide: @samp{"parts"} (the default) gives each headed chapter inside a part its own chapter, and @samp{"top"} keeps one chapter per part; @samp{--split} on the command line and @samp{S} in the outline override it for one book
+@end itemize
+
+Emacs settings are in @samp{M-x customize-group RET narrate}. The faces @samp{narrate-header}, @samp{narrate-header-key}, and @samp{narrate-header-profile} style the outline's header line.
+
+@menu
+* Files and folders::
+@end menu
+
+@node Files and folders
+@section Files and folders
+
+narrate follows the XDG base directory layout:
+
+@multitable {aaaaaaaaaaaaaaaaaaaaaaaaa} {aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+@headitem folder
+@tab holds
+@item @samp{~/.config/narrate/}
+@tab @samp{profiles.toml}, @samp{voices.json}, @samp{breeze-voices/}, @samp{tryout-designs.txt}, @samp{plugins/}
+@item @samp{~/.local/share/narrate/}
+@tab the Python venv, Breeze-TTS-2.cpp and its models
+@item @samp{~/.cache/narrate/}
+@tab auditions, previews, tryouts, the Breeze server log, the live GPU-share setting
+@end multitable
+
+@samp{XDG_CONFIG_HOME}, @samp{XDG_DATA_HOME}, and @samp{XDG_CACHE_HOME} move them, and @samp{NARRATE_CONFIG} puts the profiles file (and so the config folder) anywhere, such as a synced folder. A render's chunk cache lives in @samp{.narrate-work/} inside the output folder.
+
+@node Extending
+@chapter Extending
+
+Python files in @samp{plugins/} beside the profiles file load at startup. A plugin can add engines and input readers; @samp{examples/plugins/} has one of each.
+
+An engine subclasses @samp{narrate.engines.base.Engine}, sets @samp{name}, and implements:
+
+@itemize
+@item
+@samp{prepare()} checks it can run here and raises @samp{EngineUnavailable} if not
+@item
+@samp{identity()} returns a string naming the voice exactly; it keys the chunk cache
+@item
+@samp{synth(text)} returns 24 kHz mono 16-bit WAV bytes, raising @samp{Refused} for text it can't voice, @samp{Transient} for retryable failures, and @samp{RateLimited} when asked to slow down
+@end itemize
+
+Class attributes tell narrate the rest: @samp{max_chars} (chunk size), @samp{check_length} (re-roll audio far too short or long for its text), @samp{uses_gpu} (@samp{gpu_share} applies), and @samp{remote} (where text goes when it leaves the machine, shown before sending). @samp{narrate.engines.register(cls)} makes it available as @samp{engine = "NAME"}.
+
+A reader is a function from a @samp{Path} to a @samp{narrate.book.Book}; @samp{narrate.readers.register(".ext", func)} ties it to an extension. @samp{narrate.book.build_chapters} turns a list of @samp{(heading level or None, text)} pairs into chapters the way the built-in readers do.
+
+The backend's pieces are small modules (@samp{readers/}, @samp{engines/}, @samp{chunking}, @samp{synth}, @samp{assemble}, @samp{commands}, @samp{cli}), so a different front end, or a different kind of output, can reuse them.
+
+@node Privacy
+@chapter Privacy
+
+@itemize
+@item
+Engines that run here (@samp{tone}, @samp{breeze}, @samp{kokoro}) send nothing anywhere.
+@item
+Engines that don't (@samp{gemini}, @samp{speechify}) send each chunk's text to their service. narrate asks before a cloud profile renders a book or auditions selected text (@samp{narrate-confirm-cloud}); stock passages go without asking.
+@item
+Fallbacks can cross that line: a profile on this machine whose fallback is a cloud profile will send text if the local engine can't run. Keep private work on profiles whose whole fallback chain stays local.
+@item
+Keys live in the environment or auth-source, never in the profiles file.
+@end itemize
+
+@node Troubleshooting
+@chapter Troubleshooting
+
+@table @asis
+@item A profile says it's unavailable
+@samp{narrate-show-log} has the reason (no key, a package missing, no model, a server that didn't start). @samp{narrate-cli profiles} lists each profile's engine and fallbacks.
+@item Breeze won't start
+@samp{~/.cache/narrate/breeze-server.log} has the server's own output.
+@item Chapters look wrong
+@samp{RET} in the outline shows the extracted text. DOCX chapters come from heading styles, so titles typed as bold body text won't register; @samp{E} exports the text to Org for fixing by hand. A part only splits into chapters when its chapters have headings one level below the part's.
+@item No cover in the finished book
+a cover image ffmpeg can't embed is skipped, with a line in the log saying so; the audio and chapters are unaffected.
+@item The mode line shows no time left
+the estimate appears after a minute or so of progress, once there's a pace to measure.
+@item Formats narrate doesn't read
+convert first, e.g. @samp{soffice --headless --convert-to docx file.odt} (also .doc and .rtf) or Calibre's @samp{ebook-convert book.azw3 book.epub} (also .mobi).
+@end table
+
+@node License
+@chapter License
+
+GPL-3.0-or-later. See @samp{LICENSE}.
+
+@bye

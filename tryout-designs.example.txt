@@ -1,0 +1,8 @@
+# Voice descriptions for M-x narrate-tryout, one per line.
+# Copy to tryout-designs.txt beside your profiles file.
+# Add " | style" after a description to try a delivery note with it.
+# Lines starting with # are skipped, so you can park ones you've ruled out.
+
+A clear, friendly narrator with an even pace.
+A warm, low-voiced storyteller who sounds relaxed and good-humored. | unhurried storytelling
+A crisp, precise reader with bright diction. | brisk and lively

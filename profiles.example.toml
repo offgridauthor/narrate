@@ -1,0 +1,139 @@
+# narrate profiles
+#
+# Copy this file to ~/.config/narrate/profiles.toml (or anywhere, and point
+# NARRATE_CONFIG or `narrate-profiles-file' at it), then edit to taste.
+#
+# A profile bundles an engine, a voice, a delivery style, and an optional
+# ffmpeg filter chain. `fallback` names profiles to try, in order, when this
+# one can't run here (no key, package missing, no access). The choice is made
+# once per book: a render never switches voices partway, and rate limits are
+# waited out instead of triggering a fallback.
+#
+# The folder this file is in also holds what narrate learns as you go:
+# voices.json (designed cloud voices), breeze-voices/ (saved local voices),
+# tryout-designs.txt (descriptions for voice tryouts), and plugins/ (engines
+# and readers of your own; see examples/plugins in the package).
+#
+# ---- Engines that ship with narrate
+#
+#   tone       Dry run: ticks instead of speech. Checks extraction, chapters,
+#              and assembly with nothing else installed.
+#   gemini     Gemini TTS over the Gemini API. Needs GEMINI_API_KEY. Text
+#              leaves this machine; on Google's free tier, Google may review
+#              it and use it to improve its products.
+#   breeze     Breeze TTS 2 through a local Breeze-TTS-2.cpp server. Runs on
+#              this machine's GPU. Its weights are licensed for research and
+#              non-commercial use.
+#   kokoro     Kokoro-82M through its Python package. Runs on this machine
+#              (GPU if there is one).
+#   speechify  Speechify's API (paid). Needs SPEECHIFY_API_KEY. Text leaves
+#              this machine.
+#
+# ---- Keys any profile can use
+#
+#   engine       which engine reads this profile (required)
+#   fallback     profile names to try when this one can't run here
+#   style        a short delivery note sent with every chunk (engines that
+#                take direction: gemini, breeze)
+#   tempo        speed of the finished audio, pitch unchanged (1.0 is as
+#                spoken); applied at assembly, so changing it never
+#                re-synthesizes anything
+#   filter       an ffmpeg audio filter chain applied at assembly, like
+#                "highpass=f=80,aecho=0.8:0.5:40:0.2"
+#   loudnorm     true to even out loudness at assembly
+#   max_chars    chunk size sent per request (each engine has its own default)
+#   min_interval seconds to wait between requests
+#   gpu_share    for engines on this machine's GPU (breeze, kokoro): the
+#                fraction of the time the GPU works. After each chunk narrate
+#                rests in proportion, so 0.5 works a second and rests a
+#                second. 1.0 is full speed. M-x narrate-gpu-share changes it
+#                mid-render.
+#   audition_text  the stock passage auditions read
+#   tryout_text    the passage every voice tryout take reads
+#   split        ([defaults] only) "parts" gives each headed chapter inside a
+#                part its own chapter mark, titled with its part; "top" keeps
+#                one chapter per part
+#
+# ---- gemini keys
+#
+#   model    a Gemini TTS model (default gemini-3.8-flash-tts)
+#   voice    a prebuilt voice name (omit to let the API choose)
+#   design   a one- or two-sentence description; narrate designs a voice from
+#            it once, caches its id in voices.json, and falls back to `voice`
+#            if voice design isn't available to the key
+#   voice_id a designed voice to use as is (narrate-keep writes this)
+#   gender, language   passed to voice design (default language en-US)
+#
+# ---- breeze keys
+#
+#   design      a one- or two-sentence description; narrate designs the voice
+#               once on `ref_line`, saves it as a cloned voice in
+#               breeze-voices/, and reads every chunk in it
+#   seed        a different seed gives a different take on the same design
+#   cfg_scale   how literally the design is followed (1 is loosest)
+#   ref_audio, ref_text   clone a voice from a 5-15 s clip and its exact
+#               transcript instead of designing one; a relative path is
+#               relative to this file (narrate-keep stores kept takes so)
+#   ref_line    the sentence a design is spoken on
+#   model       a .gguf (default: the only one in ~/.local/share/narrate/models)
+#   server, port, device   the breeze-server binary, its port (8137), and
+#               "cpu" to keep off the GPU
+#
+# ---- kokoro keys
+#
+#   voice   one voice name, or a weighted blend like "voice_a:0.6,voice_b:0.4"
+#   speed   1.0 is normal
+#   lang    language code (default: the first letter of the voice name)
+#
+# ---- speechify keys
+#
+#   voice   a voice id from Speechify's catalog (required)
+#   model   a Speechify model (default simba-3.2)
+
+[defaults]
+profile = "dry-run"     # the profile outlines open on
+output_dir = "~/Audiobooks"
+format = "m4b"          # m4b, mp3 (one file with chapter marks), or mp3-split
+bitrate = "96k"
+loudnorm = true
+tempo = 1.0
+gap_paragraph = 0.45    # seconds of silence between chunks
+gap_scene = 1.4         # at scene breaks (* * *, ⁂, <hr>)
+gap_chapter = 2.2
+gpu_share = 1.0
+split = "parts"         # "parts": a part's headed chapters each get a chapter mark; "top": one per part
+
+
+[profiles.dry-run]
+engine = "tone"
+loudnorm = false
+note = "ticks instead of speech; checks chapters and assembly for free"
+
+
+# ---- one example per engine; rename, copy, and change freely
+
+[profiles.gemini]
+engine = "gemini"
+voice = "VOICE-NAME"                 # from Google's list of prebuilt voices
+fallback = ["kokoro"]
+
+[profiles.gemini-designed]
+engine = "gemini"
+design = "A clear, friendly narrator with an even pace."
+style = "steady audiobook narration"
+fallback = ["breeze-designed", "kokoro"]
+
+[profiles.breeze-designed]
+engine = "breeze"
+design = "A clear, friendly narrator with an even pace."
+fallback = ["kokoro"]
+
+[profiles.kokoro]
+engine = "kokoro"
+voice = "VOICE-NAME"                 # from Kokoro's voice list
+speed = 1.0
+
+[profiles.speechify]
+engine = "speechify"
+voice = "VOICE-ID"                   # from Speechify's voice catalog
+fallback = ["kokoro"]

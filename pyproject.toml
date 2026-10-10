@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "narrate"
+version = "0.3.0"
+description = "Turn ebooks and documents into chaptered audiobooks with pluggable speech engines"
+readme = "README.org"
+license = "GPL-3.0-or-later"
+authors = [{ name = "Stephen Webber" }]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+pdf = ["pymupdf"]
+kokoro = ["kokoro", "soundfile"]
+test = ["pytest"]
+
+[project.scripts]
+narrate = "narrate.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["narrate*"]
